@@ -6,8 +6,11 @@ use sdl2::rect::Point;
 use sdl2::render::{Canvas, RenderTarget};
 use std::error::Error;
 
-const WIDTH: u32 = 640;
-const HEIGHT: u32 = 640;
+const CANVAS_WIDTH: u32 = 640;
+const CANVAS_HEIGHT: u32 = 640;
+const VIEWPORT_WIDTH: f32 = 1.0;
+const VIEWPORT_HEIGHT: f32 = 1.0;
+const D: f32 = 1.0;
 
 #[derive(Debug)]
 struct Interpolation {
@@ -22,6 +25,12 @@ struct Vertex {
     x: i32,
     y: i32,
     h: f32,
+}
+
+struct Vector {
+    x: f32,
+    y: f32,
+    z: f32,
 }
 
 impl Interpolation {
@@ -48,6 +57,12 @@ impl Vertex {
     }
 }
 
+impl Vector {
+    fn new(x: f32, y: f32, z: f32) -> Self {
+        Vector { x, y, z }
+    }
+}
+
 impl Iterator for Interpolation {
     type Item = (i32, i32);
 
@@ -71,7 +86,20 @@ fn scale_color(c: Color, h: f32) -> Color {
 }
 
 fn plane_to_canvas(p: Point) -> Point {
-    Point::new((WIDTH as i32) / 2 + p.x, (HEIGHT as i32) / 2 - p.y)
+    Point::new((CANVAS_WIDTH as i32) / 2 + p.x, (CANVAS_HEIGHT as i32) / 2 - p.y)
+}
+
+fn viewport_to_plane(v: Vector) -> Point {
+    let x = v.x * (CANVAS_WIDTH as f32) / VIEWPORT_WIDTH;
+    let y = v.y * (CANVAS_HEIGHT as f32) / VIEWPORT_HEIGHT;
+    Point::new(x as i32, y as i32)
+}
+
+fn project(v: Vector) -> Vector {
+    let x = v.x * D / v.z;
+    let y = v.y * D / v.z;
+    let z = D;
+    Vector::new(x, y, z)
 }
 
 fn put_pixel<T>(canvas: &mut Canvas<T>, p: Point) -> Result<(), Box<dyn Error>>
@@ -230,13 +258,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sdl = sdl2::init()?;
     let video_subsystem = sdl.video()?;
 
-    let window = video_subsystem.window("rstr", WIDTH, HEIGHT).build()?;
+    let window = video_subsystem.window("rstr", CANVAS_WIDTH, CANVAS_HEIGHT).build()?;
 
     let mut canvas = window.into_canvas().build()?;
 
     canvas.set_draw_color(Color::RGB(248, 248, 255));
     canvas.clear();
 
+    /*
     let c = Color::RGB(0, 139, 139);
     let p0 = Vertex::new(-200, -250, 1.0);
     let p1 = Vertex::new(200, 50, 0.5);
@@ -244,6 +273,52 @@ fn main() -> Result<(), Box<dyn Error>> {
     draw_filled_triangle(&mut canvas, p0, p1, p2, c)?;
     canvas.set_draw_color(Color::RGB(0, 0, 0));
     draw_wireframe_triangle(&mut canvas, p0.to_point(), p1.to_point(), p2.to_point())?;
+    canvas.present();
+    */
+
+    // The four "front" vertices.
+    let v0 = Vector::new(-2.0, -0.5, 5.0);
+    let v1 = Vector::new(-2.0,  0.5, 5.0);
+    let v2 = Vector::new(-1.0,  0.5, 5.0);
+    let v3 = Vector::new(-1.0, -0.5, 5.0);
+
+    // The four "back" vertices.
+    let v4 = Vector::new(-2.0, -0.5, 6.0);
+    let v5 = Vector::new(-2.0,  0.5, 6.0);
+    let v6 = Vector::new(-1.0,  0.5, 6.0);
+    let v7 = Vector::new(-1.0, -0.5, 6.0);
+
+    // Project the vertices and convert them to plane space.
+    let p0 = viewport_to_plane(project(v0));
+    let p1 = viewport_to_plane(project(v1));
+    let p2 = viewport_to_plane(project(v2));
+    let p3 = viewport_to_plane(project(v3));
+    let p4 = viewport_to_plane(project(v4));
+    let p5 = viewport_to_plane(project(v5));
+    let p6 = viewport_to_plane(project(v6));
+    let p7 = viewport_to_plane(project(v7));
+
+    // The front face.
+    canvas.set_draw_color(Color::RGB(0, 0, 255));
+    draw_line(&mut canvas, p0, p1)?;
+    draw_line(&mut canvas, p1, p2)?;
+    draw_line(&mut canvas, p2, p3)?;
+    draw_line(&mut canvas, p3, p0)?;
+
+    // The back face.
+    canvas.set_draw_color(Color::RGB(255, 0, 0));
+    draw_line(&mut canvas, p4, p5)?;
+    draw_line(&mut canvas, p5, p6)?;
+    draw_line(&mut canvas, p6, p7)?;
+    draw_line(&mut canvas, p7, p4)?;
+
+    // The front face.
+    canvas.set_draw_color(Color::RGB(0, 255, 0));
+    draw_line(&mut canvas, p0, p4)?;
+    draw_line(&mut canvas, p1, p5)?;
+    draw_line(&mut canvas, p2, p6)?;
+    draw_line(&mut canvas, p3, p7)?;
+
     canvas.present();
 
     let mut event_pump = sdl.event_pump()?;
