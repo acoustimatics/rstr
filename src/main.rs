@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
+use glam::f32::Vec3;
 use sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -20,17 +24,28 @@ struct Interpolation {
     a: f32,
 }
 
+struct Instance {
+    model_index: usize,
+    position: Vec3,
+}
+
+struct Model {
+    vertices: Vec<Vec3>,
+    triangles: Vec<Triangle>,
+}
+
+type RenderResult = Result<(), Box<dyn Error>>;
+
+struct Triangle {
+    vertices: [usize; 3],
+    color: Color,
+}
+
 #[derive(Copy, Clone)]
 struct Vertex {
     x: i32,
     y: i32,
     h: f32,
-}
-
-struct Vector {
-    x: f32,
-    y: f32,
-    z: f32,
 }
 
 impl Interpolation {
@@ -47,6 +62,30 @@ impl Interpolation {
     }
 }
 
+impl Instance {
+    fn new(model_index: usize, position: Vec3) -> Self {
+        Instance {
+            model_index,
+            position,
+        }
+    }
+}
+
+impl Model {
+    fn new(vertices: Vec<Vec3>, triangles: Vec<Triangle>) -> Self {
+        Model {
+            vertices,
+            triangles,
+        }
+    }
+}
+
+impl Triangle {
+    fn new(vertices: [usize; 3], color: Color) -> Self {
+        Triangle { vertices, color }
+    }
+}
+
 impl Vertex {
     fn new(x: i32, y: i32, h: f32) -> Self {
         Vertex { x, y, h }
@@ -54,12 +93,6 @@ impl Vertex {
 
     fn to_point(self) -> Point {
         Point::new(self.x, self.y)
-    }
-}
-
-impl Vector {
-    fn new(x: f32, y: f32, z: f32) -> Self {
-        Vector { x, y, z }
     }
 }
 
@@ -86,23 +119,25 @@ fn scale_color(c: Color, h: f32) -> Color {
 }
 
 fn plane_to_canvas(p: Point) -> Point {
-    Point::new((CANVAS_WIDTH as i32) / 2 + p.x, (CANVAS_HEIGHT as i32) / 2 - p.y)
+    Point::new(
+        (CANVAS_WIDTH as i32) / 2 + p.x,
+        (CANVAS_HEIGHT as i32) / 2 - p.y,
+    )
 }
 
-fn viewport_to_plane(v: Vector) -> Point {
-    let x = v.x * (CANVAS_WIDTH as f32) / VIEWPORT_WIDTH;
-    let y = v.y * (CANVAS_HEIGHT as f32) / VIEWPORT_HEIGHT;
+fn viewport_to_plane(x: f32, y: f32) -> Point {
+    let x = x * (CANVAS_WIDTH as f32) / VIEWPORT_WIDTH;
+    let y = y * (CANVAS_HEIGHT as f32) / VIEWPORT_HEIGHT;
     Point::new(x as i32, y as i32)
 }
 
-fn project(v: Vector) -> Vector {
+fn project(v: &Vec3) -> Point {
     let x = v.x * D / v.z;
     let y = v.y * D / v.z;
-    let z = D;
-    Vector::new(x, y, z)
+    viewport_to_plane(x, y)
 }
 
-fn put_pixel<T>(canvas: &mut Canvas<T>, p: Point) -> Result<(), Box<dyn Error>>
+fn put_pixel<T>(canvas: &mut Canvas<T>, p: Point) -> RenderResult
 where
     T: RenderTarget,
 {
@@ -112,7 +147,7 @@ where
     Ok(())
 }
 
-fn draw_line<T>(canvas: &mut Canvas<T>, p0: Point, p1: Point) -> Result<(), Box<dyn Error>>
+fn draw_line<T>(canvas: &mut Canvas<T>, p0: Point, p1: Point) -> RenderResult
 where
     T: RenderTarget,
 {
@@ -153,7 +188,7 @@ fn draw_horizontal_line<T>(
     h0: f32,
     h1: f32,
     color: Color,
-) -> Result<(), Box<dyn Error>>
+) -> RenderResult
 where
     T: RenderTarget,
 {
@@ -182,7 +217,7 @@ fn draw_filled_triangle<T>(
     p1: Vertex,
     p2: Vertex,
     color: Color,
-) -> Result<(), Box<dyn Error>>
+) -> RenderResult
 where
     T: RenderTarget,
 {
@@ -243,7 +278,7 @@ fn draw_wireframe_triangle<T>(
     p0: Point,
     p1: Point,
     p2: Point,
-) -> Result<(), Box<dyn Error>>
+) -> RenderResult
 where
     T: RenderTarget,
 {
@@ -254,70 +289,95 @@ where
     Ok(())
 }
 
+fn render_instance<T>(canvas: &mut Canvas<T>, model: &Model, instance: &Instance) -> RenderResult
+where
+    T: RenderTarget,
+{
+    let mut projected = vec![];
+    for v in model.vertices.iter() {
+        let v = v + &instance.position;
+        let v = project(&v);
+        projected.push(v);
+    }
+    for triangle in model.triangles.iter() {
+        render_triangle(canvas, &projected, triangle)?;
+    }
+
+    Ok(())
+}
+
+fn render_triangle<T>(canvas: &mut Canvas<T>, points: &[Point], triangle: &Triangle) -> RenderResult
+where
+    T: RenderTarget,
+{
+    canvas.set_draw_color(triangle.color);
+    draw_wireframe_triangle(
+        canvas,
+        points[triangle.vertices[0]],
+        points[triangle.vertices[1]],
+        points[triangle.vertices[2]],
+    )
+}
+
+fn render_scene<T>(canvas: &mut Canvas<T>, models: &[Model], instances: &[Instance]) -> RenderResult
+where
+    T: RenderTarget,
+{
+    for instance in instances.iter() {
+        let model = &models[instance.model_index];
+        render_instance(canvas, model, instance)?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let sdl = sdl2::init()?;
     let video_subsystem = sdl.video()?;
 
-    let window = video_subsystem.window("rstr", CANVAS_WIDTH, CANVAS_HEIGHT).build()?;
+    let window = video_subsystem
+        .window("rstr", CANVAS_WIDTH, CANVAS_HEIGHT)
+        .build()?;
 
     let mut canvas = window.into_canvas().build()?;
 
     canvas.set_draw_color(Color::RGB(248, 248, 255));
     canvas.clear();
 
-    /*
-    let c = Color::RGB(0, 139, 139);
-    let p0 = Vertex::new(-200, -250, 1.0);
-    let p1 = Vertex::new(200, 50, 0.5);
-    let p2 = Vertex::new(20, 250, 0.25);
-    draw_filled_triangle(&mut canvas, p0, p1, p2, c)?;
-    canvas.set_draw_color(Color::RGB(0, 0, 0));
-    draw_wireframe_triangle(&mut canvas, p0.to_point(), p1.to_point(), p2.to_point())?;
-    canvas.present();
-    */
+    let vertices = vec![
+        Vec3::new(1.0, 1.0, 1.0),
+        Vec3::new(-1.0, 1.0, 1.0),
+        Vec3::new(-1.0, -1.0, 1.0),
+        Vec3::new(1.0, -1.0, 1.0),
+        Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(-1.0, 1.0, -1.0),
+        Vec3::new(-1.0, -1.0, -1.0),
+        Vec3::new(1.0, -1.0, -1.0),
+    ];
 
-    // The four "front" vertices.
-    let v0 = Vector::new(-2.0, -0.5, 5.0);
-    let v1 = Vector::new(-2.0,  0.5, 5.0);
-    let v2 = Vector::new(-1.0,  0.5, 5.0);
-    let v3 = Vector::new(-1.0, -0.5, 5.0);
+    let triangles = vec![
+        Triangle::new([0, 1, 2], Color::RED),
+        Triangle::new([0, 2, 3], Color::RED),
+        Triangle::new([4, 0, 3], Color::GREEN),
+        Triangle::new([4, 3, 7], Color::GREEN),
+        Triangle::new([5, 4, 7], Color::BLUE),
+        Triangle::new([5, 7, 6], Color::BLUE),
+        Triangle::new([1, 5, 6], Color::YELLOW),
+        Triangle::new([1, 6, 2], Color::YELLOW),
+        Triangle::new([4, 5, 1], Color::MAGENTA),
+        Triangle::new([4, 1, 0], Color::MAGENTA),
+        Triangle::new([2, 6, 7], Color::CYAN),
+        Triangle::new([2, 7, 3], Color::CYAN),
+    ];
 
-    // The four "back" vertices.
-    let v4 = Vector::new(-2.0, -0.5, 6.0);
-    let v5 = Vector::new(-2.0,  0.5, 6.0);
-    let v6 = Vector::new(-1.0,  0.5, 6.0);
-    let v7 = Vector::new(-1.0, -0.5, 6.0);
+    let models = vec![Model::new(vertices, triangles)];
 
-    // Project the vertices and convert them to plane space.
-    let p0 = viewport_to_plane(project(v0));
-    let p1 = viewport_to_plane(project(v1));
-    let p2 = viewport_to_plane(project(v2));
-    let p3 = viewport_to_plane(project(v3));
-    let p4 = viewport_to_plane(project(v4));
-    let p5 = viewport_to_plane(project(v5));
-    let p6 = viewport_to_plane(project(v6));
-    let p7 = viewport_to_plane(project(v7));
+    let instances = vec![
+        Instance::new(0, Vec3::new(-1.5, 0.0, 7.0)),
+        Instance::new(0, Vec3::new(1.25, 2.0, 7.5)),
+    ];
 
-    // The front face.
-    canvas.set_draw_color(Color::RGB(0, 0, 255));
-    draw_line(&mut canvas, p0, p1)?;
-    draw_line(&mut canvas, p1, p2)?;
-    draw_line(&mut canvas, p2, p3)?;
-    draw_line(&mut canvas, p3, p0)?;
-
-    // The back face.
-    canvas.set_draw_color(Color::RGB(255, 0, 0));
-    draw_line(&mut canvas, p4, p5)?;
-    draw_line(&mut canvas, p5, p6)?;
-    draw_line(&mut canvas, p6, p7)?;
-    draw_line(&mut canvas, p7, p4)?;
-
-    // The front face.
-    canvas.set_draw_color(Color::RGB(0, 255, 0));
-    draw_line(&mut canvas, p0, p4)?;
-    draw_line(&mut canvas, p1, p5)?;
-    draw_line(&mut canvas, p2, p6)?;
-    draw_line(&mut canvas, p3, p7)?;
+    render_scene(&mut canvas, &models, &instances)?;
 
     canvas.present();
 
