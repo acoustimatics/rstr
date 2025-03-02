@@ -3,7 +3,6 @@
 
 mod math;
 
-use math::Vec4;
 use sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -11,6 +10,10 @@ use sdl2::pixels::Color;
 use sdl2::rect::Point;
 use sdl2::render::{Canvas, RenderTarget};
 use std::error::Error;
+
+use crate::math::mat::*;
+use math::transform::*;
+use crate::math::vec::Vec4;
 
 const CANVAS_WIDTH: u32 = 640;
 const CANVAS_HEIGHT: u32 = 640;
@@ -127,18 +130,6 @@ fn plane_to_canvas(p: Point) -> Point {
     )
 }
 
-fn viewport_to_plane(x: f32, y: f32) -> Point {
-    let x = x * (CANVAS_WIDTH as f32) / VIEWPORT_WIDTH;
-    let y = y * (CANVAS_HEIGHT as f32) / VIEWPORT_HEIGHT;
-    Point::new(x as i32, y as i32)
-}
-
-fn project(v: &Vec4) -> Point {
-    let x = v.x() * D / v.z();
-    let y = v.y() * D / v.z();
-    viewport_to_plane(x, y)
-}
-
 fn put_pixel<T>(canvas: &mut Canvas<T>, p: Point) -> RenderResult
 where
     T: RenderTarget,
@@ -231,7 +222,7 @@ where
     let x_slope_long = ((p2.x - p0.x) as f32) / ((p2.y - p0.y) as f32);
     let x_slope_short = ((p1.x - p0.x) as f32) / ((p1.y - p0.y) as f32);
     let h_slope_long = (p2.h - p0.h) / ((p2.y - p0.y) as f32);
-    let h_slope_short = dbg!((p1.h - p0.h) / ((p1.y - p0.y) as f32));
+    let h_slope_short = (p1.h - p0.h) / ((p1.y - p0.y) as f32);
 
     let mut x_long = p0.x as f32;
     let mut x_short = p0.x as f32;
@@ -295,11 +286,25 @@ fn render_instance<T>(canvas: &mut Canvas<T>, model: &Model, instance: &Instance
 where
     T: RenderTarget,
 {
+    let p = perspective_projection(D);
+    let m = viewport_to_canvas(CANVAS_WIDTH, CANVAS_HEIGHT, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+    let i_t = translation(instance.position);
+
+    let m_projection = m.mul_mat3x4(&p);
+    let m_model = i_t;
+
+    let f = m_projection.mul_mat4(&m_model);
+
     let mut projected = vec![];
+
     for v in model.vertices.iter() {
-        let v = v + &instance.position;
-        let v = project(&v);
-        projected.push(v);
+        let v = f.mul_vec4(*v);
+
+        let x = v.x / v.z;
+        let y = v.y / v.z;
+        let p = Point::new(x as i32, y as i32);
+
+        projected.push(p);
     }
     for triangle in model.triangles.iter() {
         render_triangle(canvas, &projected, triangle)?;
@@ -333,6 +338,36 @@ where
     Ok(())
 }
 
+fn translation(v: Vec4) -> Mat4 {
+    let c0 = [1.0, 0.0, 0.0, 0.0];
+    let c1 = [0.0, 1.0, 0.0, 0.0];
+    let c2 = [0.0, 0.0, 1.0, 0.0];
+    let c3 = [v.x, v.y, v.z, 1.0];
+    Mat4::new(c0, c1, c2, c3)
+}
+
+fn perspective_projection(d: f32) -> Mat3x4 {
+    let c0 = [d, 0.0, 0.0];
+    let c1 = [0.0, d, 0.0];
+    let c2 = [0.0, 0.0, 1.0];
+    let c3 = [0.0; 3];
+    Mat3x4::new(c0, c1, c2, c3)
+}
+
+fn viewport_to_canvas(
+    canvas_width: u32,
+    canvas_height: u32,
+    viewport_width: f32,
+    viewport_height: f32,
+) -> Mat3 {
+    let canvas_width = canvas_width as f32;
+    let canvas_height = canvas_height as f32;
+    let c0 = [canvas_width / viewport_width, 0.0, 0.0];
+    let c1 = [0.0, canvas_height / viewport_height, 0.0];
+    let c2 = [0.0, 0.0, 1.0];
+    Mat3::new(c0, c1, c2)
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let sdl = sdl2::init()?;
     let video_subsystem = sdl.video()?;
@@ -343,7 +378,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut canvas = window.into_canvas().build()?;
 
-    canvas.set_draw_color(Color::RGB(248, 248, 255));
+    canvas.set_draw_color(Color::RGB(0x00, 0x00, 0x00));
     canvas.clear();
 
     let vertices = vec![
@@ -375,8 +410,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let models = vec![Model::new(vertices, triangles)];
 
     let instances = vec![
-        Instance::new(0, Vec4::new(-1.5, 0.0, 7.0, 1.0)),
-        Instance::new(0, Vec4::new(1.25, 2.0, 7.5, 1.0)),
+        Instance::new(0, Vec4::new(-1.5, 0.0, 7.0, 0.0)),
+        Instance::new(0, Vec4::new(1.25, 2.0, 7.5, 0.0)),
     ];
 
     render_scene(&mut canvas, &models, &instances)?;
