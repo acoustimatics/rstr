@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-use glam::f32::Vec4;
+mod math;
+
+use math::Vec4;
 use sdl2;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -132,8 +134,8 @@ fn viewport_to_plane(x: f32, y: f32) -> Point {
 }
 
 fn project(v: &Vec4) -> Point {
-    let x = v.x * D / v.z;
-    let y = v.y * D / v.z;
+    let x = v.x() * D / v.z();
+    let y = v.y() * D / v.z();
     viewport_to_plane(x, y)
 }
 
@@ -345,14 +347,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     canvas.clear();
 
     let vertices = vec![
-        Vec4::new(1.0, 1.0, 1.0, 1.0),
-        Vec4::new(-1.0, 1.0, 1.0, 1.0),
-        Vec4::new(-1.0, -1.0, 1.0, 1.0),
-        Vec4::new(1.0, -1.0, 1.0, 1.0),
-        Vec4::new(1.0, 1.0, -1.0, 1.0),
-        Vec4::new(-1.0, 1.0, -1.0, 1.0),
-        Vec4::new(-1.0, -1.0, -1.0, 1.0),
-        Vec4::new(1.0, -1.0, -1.0, 1.0),
+        Vec4::new_point(1.0, 1.0, 1.0),
+        Vec4::new_point(-1.0, 1.0, 1.0),
+        Vec4::new_point(-1.0, -1.0, 1.0),
+        Vec4::new_point(1.0, -1.0, 1.0),
+        Vec4::new_point(1.0, 1.0, -1.0),
+        Vec4::new_point(-1.0, 1.0, -1.0),
+        Vec4::new_point(-1.0, -1.0, -1.0),
+        Vec4::new_point(1.0, -1.0, -1.0),
     ];
 
     let triangles = vec![
