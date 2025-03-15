@@ -38,6 +38,12 @@ struct Model {
     triangles: Vec<Triangle>,
 }
 
+struct Scene {
+    models: Vec<Model>,
+    instances: Vec<Instance>,
+    camera: Camera,
+}
+
 struct Triangle {
     vertices: [usize; 3],
     color: Color,
@@ -69,96 +75,66 @@ impl Triangle {
     }
 }
 
-fn render_instance<T>(
-    canvas: &mut Canvas<T>,
-    model: &Model,
-    instance: &Instance,
-    camera: &Camera,
-) -> RenderResult
-where
-    T: RenderTarget,
-{
-    let f = {
-        let m_projection = {
-            let p = perspective_projection(D);
-            let m =
-                viewport_to_canvas(CANVAS_WIDTH, CANVAS_HEIGHT, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
-            m * p
-        };
-        let m_camera = {
-            let c_t = translation(-camera.translation);
-            let c_rx = rotation_x(-camera.rotation[0]);
-            let c_ry = rotation_y(-camera.rotation[1]);
-            let c_rz = rotation_z(-camera.rotation[2]);
-            c_rx * c_ry * c_rz * c_t
-        };
-        let m_model = {
-            let i_t = translation(instance.translation);
-            let i_s = scaling(instance.scaling);
-            let i_r = rotation(instance.rotation);
-            i_t * i_r * i_s
-        };
-        m_projection * m_camera * m_model
-    };
-
-    let mut projected = vec![];
-
-    for &v in model.vertices.iter() {
-        let v = f * v;
-
-        let x = v[0] / v[2];
-        let y = v[1] / v[2];
-        let p = Point::new(x as i32, y as i32);
-
-        projected.push(p);
-    }
-    for triangle in model.triangles.iter() {
-        render_triangle(canvas, &projected, triangle)?;
-    }
-
-    Ok(())
-}
-
-fn render_triangle<T>(canvas: &mut Canvas<T>, points: &[Point], triangle: &Triangle) -> RenderResult
-where
-    T: RenderTarget,
-{
-    canvas.set_draw_color(triangle.color);
-    draw_wireframe_triangle(
-        canvas,
-        points[triangle.vertices[0]],
-        points[triangle.vertices[1]],
-        points[triangle.vertices[2]],
-    )
-}
-
 fn render_scene<T>(
     canvas: &mut Canvas<T>,
-    models: &[Model],
-    instances: &[Instance],
-    camera: &Camera,
+    scene: &Scene
 ) -> RenderResult
 where
     T: RenderTarget,
 {
-    for instance in instances.iter() {
-        let model = &models[instance.model_index];
-        render_instance(canvas, model, instance, camera)?;
+    let m_projection = {
+        let p = perspective_projection(D);
+        let m =
+            viewport_to_canvas(CANVAS_WIDTH, CANVAS_HEIGHT, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+        m * p
+    };
+    let m_camera = {
+        let c_t = translation(-scene.camera.translation);
+        let c_rx = rotation_x(-scene.camera.rotation[0]);
+        let c_ry = rotation_y(-scene.camera.rotation[1]);
+        let c_rz = rotation_z(-scene.camera.rotation[2]);
+        c_rx * c_ry * c_rz * c_t
+    };
+
+    for instance in scene.instances.iter() {
+        let model = &scene.models[instance.model_index];
+
+        let f = {
+            let m_model = {
+                let i_t = translation(instance.translation);
+                let i_s = scaling(instance.scaling);
+                let i_r = rotation(instance.rotation);
+                i_t * i_r * i_s
+            };
+            m_projection * m_camera * m_model
+        };
+
+        let mut projected = vec![];
+        for &v in model.vertices.iter() {
+            let v = f * v;
+
+            let x = v[0] / v[2];
+            let y = v[1] / v[2];
+            let p = Point::new(x as i32, y as i32);
+
+            projected.push(p);
+        }
+
+        for triangle in model.triangles.iter() {
+            canvas.set_draw_color(triangle.color);
+            draw_wireframe_triangle(
+                canvas,
+                projected[triangle.vertices[0]],
+                projected[triangle.vertices[1]],
+                projected[triangle.vertices[2]],
+            )?;
+        }
     }
 
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let sdl = sdl2::init()?;
-    let video_subsystem = sdl.video()?;
-
-    let window = video_subsystem
-        .window("rstr", CANVAS_WIDTH, CANVAS_HEIGHT)
-        .build()?;
-
-    let mut canvas = window.into_canvas().build()?;
-
+fn build_scene() -> Scene {
     let vertices = vec![
         Vec4::new(1.0, 1.0, 1.0, 1.0),
         Vec4::new(-1.0, 1.0, 1.0, 1.0),
@@ -187,20 +163,54 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let models = vec![Model::new(vertices, triangles)];
 
-    let mut instances = vec![
+    let instances = vec![
         Instance::new(0),
         Instance::new(0),
         Instance::new(0),
         Instance::new(0),
     ];
 
-    let mut camera = Camera {
+    let camera = Camera {
         translation: Vec4::new(-1.0, 0.0, 0.0, 0.0),
         rotation: Vec3::new(0.0, 0.0, 0.0),
     };
 
-    let mut t0 = 0.0;
+    Scene { models, instances, camera }
+}
 
+fn update_scene(scene: &mut Scene, t: f32) {
+    let tau = 2.0 * PI;
+    let t14 = t + 1.0 * tau / 4.0;
+    let t24 = t + 2.0 * tau / 4.0;
+    let t34 = t + 3.0 * tau / 4.0;
+
+    let rad = 2.0;
+
+    scene.camera.rotation = Vec3::new(0.0, t.sin()/4.0, 0.0);
+
+    scene.instances[0].translation = Vec4::new(rad * t.cos(), rad * t.sin(), 7.0, 0.0);
+    scene.instances[1].translation = Vec4::new(rad * t14.cos(), rad * t14.sin(), 7.0, 0.0);
+    scene.instances[2].translation = Vec4::new(rad * t24.cos(), rad * t24.sin(), 7.0, 0.0);
+    scene.instances[3].translation = Vec4::new(rad * t34.cos(), rad * t34.sin(), 7.0, 0.0);
+
+    scene.instances[1].scaling = Vec3::new(t.sin().abs(), t14.sin().abs(), t24.sin().abs());
+    scene.instances[2].scaling = Vec3::new(t.sin().abs(), t14.sin().abs(), t24.sin().abs());
+
+    scene.instances[0].rotation = Vec3::new(t, t14, t24);
+    scene.instances[2].rotation = Vec3::new(t, t14, t24);
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let sdl = sdl2::init()?;
+    let video_subsystem = sdl.video()?;
+
+    let window = video_subsystem
+        .window("rstr", CANVAS_WIDTH, CANVAS_HEIGHT)
+        .build()?;
+
+    let mut canvas = window.into_canvas().build()?;
+    let mut scene = build_scene();
+    let mut t = 0.0;
     let mut event_pump = sdl.event_pump()?;
     'main_loop: loop {
         for event in event_pump.poll_iter() {
@@ -216,32 +226,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        let tau = 2.0 * PI;
-        let t14 = t0 + 1.0 * tau / 4.0;
-        let t24 = t0 + 2.0 * tau / 4.0;
-        let t34 = t0 + 3.0 * tau / 4.0;
-
-        let rad = 2.0;
-
-        camera.rotation = Vec3::new(0.0, t0.sin()/4.0, 0.0);
-
-        instances[0].translation = Vec4::new(rad * t0.cos(), rad * t0.sin(), 7.0, 0.0);
-        instances[1].translation = Vec4::new(rad * t14.cos(), rad * t14.sin(), 7.0, 0.0);
-        instances[2].translation = Vec4::new(rad * t24.cos(), rad * t24.sin(), 7.0, 0.0);
-        instances[3].translation = Vec4::new(rad * t34.cos(), rad * t34.sin(), 7.0, 0.0);
-
-        instances[1].scaling = Vec3::new(t0.sin().abs(), t14.sin().abs(), t24.sin().abs());
-        instances[2].scaling = Vec3::new(t0.sin().abs(), t14.sin().abs(), t24.sin().abs());
-
-        instances[0].rotation = Vec3::new(t0, t14, t24);
-        instances[2].rotation = Vec3::new(t0, t14, t24);
+        update_scene(&mut scene, t);
 
         canvas.set_draw_color(Color::RGB(0x00, 0x00, 0x00));
         canvas.clear();
-        render_scene(&mut canvas, &models, &instances, &camera)?;
+        render_scene(&mut canvas, &scene)?;
         canvas.present();
 
-        t0 += 0.001;
+        t += 0.001;
     }
 
     Ok(())
