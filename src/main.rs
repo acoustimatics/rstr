@@ -47,9 +47,9 @@ impl Instance {
     fn new(model_index: usize) -> Self {
         Instance {
             model_index,
-            translation: vec4!(0.0),
-            scaling: vec3!(1.0),
-            rotation: vec3!(0.0),
+            translation: Vec4::new(0.0, 0.0, 0.0, 0.0),
+            scaling: Vec3::new(1.0, 1.0, 1.0),
+            rotation: Vec3::new(0.0, 0.0, 0.0),
         }
     }
 }
@@ -160,14 +160,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut canvas = window.into_canvas().build()?;
 
     let vertices = vec![
-        vec4!(1.0, 1.0, 1.0, 1.0),
-        vec4!(-1.0, 1.0, 1.0, 1.0),
-        vec4!(-1.0, -1.0, 1.0, 1.0),
-        vec4!(1.0, -1.0, 1.0, 1.0),
-        vec4!(1.0, 1.0, -1.0, 1.0),
-        vec4!(-1.0, 1.0, -1.0, 1.0),
-        vec4!(-1.0, -1.0, -1.0, 1.0),
-        vec4!(1.0, -1.0, -1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0),
+        Vec4::new(-1.0, 1.0, 1.0, 1.0),
+        Vec4::new(-1.0, -1.0, 1.0, 1.0),
+        Vec4::new(1.0, -1.0, 1.0, 1.0),
+        Vec4::new(1.0, 1.0, -1.0, 1.0),
+        Vec4::new(-1.0, 1.0, -1.0, 1.0),
+        Vec4::new(-1.0, -1.0, -1.0, 1.0),
+        Vec4::new(1.0, -1.0, -1.0, 1.0),
     ];
 
     let triangles = vec![
@@ -195,8 +195,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     ];
 
     let mut camera = Camera {
-        translation: vec4!(-1.0, 0.0, 0.0, 0.0),
-        rotation: vec3!(0.0),
+        translation: Vec4::new(-1.0, 0.0, 0.0, 0.0),
+        rotation: Vec3::new(0.0, 0.0, 0.0),
     };
 
     let mut t0 = 0.0;
@@ -223,18 +223,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let rad = 2.0;
 
-        camera.rotation = vec3!(0.0, t0.sin()/4.0, 0.0);
+        camera.rotation = Vec3::new(0.0, t0.sin()/4.0, 0.0);
 
-        instances[0].translation = vec4!(rad * t0.cos(), rad * t0.sin(), 7.0, 0.0);
-        instances[1].translation = vec4!(rad * t14.cos(), rad * t14.sin(), 7.0, 0.0);
-        instances[2].translation = vec4!(rad * t24.cos(), rad * t24.sin(), 7.0, 0.0);
-        instances[3].translation = vec4!(rad * t34.cos(), rad * t34.sin(), 7.0, 0.0);
+        instances[0].translation = Vec4::new(rad * t0.cos(), rad * t0.sin(), 7.0, 0.0);
+        instances[1].translation = Vec4::new(rad * t14.cos(), rad * t14.sin(), 7.0, 0.0);
+        instances[2].translation = Vec4::new(rad * t24.cos(), rad * t24.sin(), 7.0, 0.0);
+        instances[3].translation = Vec4::new(rad * t34.cos(), rad * t34.sin(), 7.0, 0.0);
 
-        instances[1].scaling = vec3!(t0.sin().abs(), t14.sin().abs(), t24.sin().abs());
-        instances[2].scaling = vec3!(t0.sin().abs(), t14.sin().abs(), t24.sin().abs());
+        instances[1].scaling = Vec3::new(t0.sin().abs(), t14.sin().abs(), t24.sin().abs());
+        instances[2].scaling = Vec3::new(t0.sin().abs(), t14.sin().abs(), t24.sin().abs());
 
-        instances[0].rotation = vec3!(t0, t14, t24);
-        instances[2].rotation = vec3!(t0, t14, t24);
+        instances[0].rotation = Vec3::new(t0, t14, t24);
+        instances[2].rotation = Vec3::new(t0, t14, t24);
 
         canvas.set_draw_color(Color::RGB(0x00, 0x00, 0x00));
         canvas.clear();
