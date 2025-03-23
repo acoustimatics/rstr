@@ -40,9 +40,9 @@ impl Interpolation {
         Interpolation { i_end, i, d, a }
     }
 
-//  fn new_by_y(p0: Vertex, p1: Vertex) -> Self {
-//      Interpolation::new(p0.y, p0.x, p1.y, p1.x)
-//  }
+    //  fn new_by_y(p0: Vertex, p1: Vertex) -> Self {
+    //      Interpolation::new(p0.y, p0.x, p1.y, p1.x)
+    //  }
 }
 
 impl Vertex {
@@ -211,7 +211,6 @@ where
 
     Ok(())
 }
-
 
 /// Converts a point from plane space to canvas space. Plane space is like
 /// canvas space, except the origin is in the middle of the canvas.

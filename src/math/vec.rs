@@ -1,6 +1,6 @@
 //! Vector type implementations.
 
-use std::ops::{Index, Mul, Neg};
+use std::ops::{Add, Div, Index, Mul, Neg, Sub};
 
 /// A three dimensional vector.
 #[derive(Copy, Clone, Debug)]
@@ -19,6 +19,55 @@ impl Vec3 {
 impl Vec4 {
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
         Vec4([x, y, z, w])
+    }
+
+    pub fn dot(self, rhs: Vec4) -> f32 {
+        self[0] * rhs[0] + self[1] * rhs[1] + self[2] * rhs[2]
+    }
+
+    pub fn magnitude(self) -> f32 {
+        self.dot(self).sqrt()
+    }
+
+    pub fn normalize(self) -> Self {
+        self / self.magnitude()
+    }
+}
+
+impl Add for Vec3 {
+    type Output = Vec3;
+
+    fn add(self, rhs: Vec3) -> Vec3 {
+        Vec3::new(self[0] + rhs[0], self[1] + rhs[1], self[2] + rhs[2])
+    }
+}
+
+impl Add for Vec4 {
+    type Output = Vec4;
+
+    fn add(self, rhs: Vec4) -> Vec4 {
+        Vec4::new(
+            self[0] + rhs[0],
+            self[1] + rhs[1],
+            self[2] + rhs[2],
+            self[3] + rhs[3],
+        )
+    }
+}
+
+impl Div<f32> for Vec3 {
+    type Output = Vec3;
+
+    fn div(self, rhs: f32) -> Vec3 {
+        Vec3::new(self[0] / rhs, self[1] / rhs, self[2] / rhs)
+    }
+}
+
+impl Div<f32> for Vec4 {
+    type Output = Vec4;
+
+    fn div(self, rhs: f32) -> Vec4 {
+        Vec4::new(self[0] / rhs, self[1] / rhs, self[2] / rhs, self[3] / rhs)
     }
 }
 
@@ -67,5 +116,26 @@ impl Neg for Vec4 {
 
     fn neg(self) -> Vec4 {
         Vec4::new(-self[0], -self[1], -self[2], -self[3])
+    }
+}
+
+impl Sub for Vec3 {
+    type Output = Vec3;
+
+    fn sub(self, rhs: Vec3) -> Vec3 {
+        Vec3::new(self[0] - rhs[0], self[1] - rhs[1], self[2] - rhs[2])
+    }
+}
+
+impl Sub for Vec4 {
+    type Output = Vec4;
+
+    fn sub(self, rhs: Vec4) -> Vec4 {
+        Vec4::new(
+            self[0] - rhs[0],
+            self[1] - rhs[1],
+            self[2] - rhs[2],
+            self[3] - rhs[3],
+        )
     }
 }

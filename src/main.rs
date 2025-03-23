@@ -14,8 +14,10 @@ use std::error::Error;
 use std::f32::consts::PI;
 
 use gfx::*;
+use math::plane::*;
 use math::transform::*;
 use math::vec::*;
+use math::{mat::*, transform};
 
 const VIEWPORT_WIDTH: f32 = 1.0;
 const VIEWPORT_HEIGHT: f32 = 1.0;
@@ -26,27 +28,37 @@ struct Camera {
     rotation: Vec3,
 }
 
-struct Instance {
-    model_index: usize,
-    translation: Vec4,
-    scaling: Vec3,
-    rotation: Vec3,
-}
-
 struct Model {
     vertices: Vec<Vec4>,
-    triangles: Vec<Triangle>,
+    triangles: Vec<ModelTriangle>,
+}
+
+struct ClippingPlanes {
+    near: Plane,
+    left: Plane,
+    right: Plane,
+    bottom: Plane,
+    top: Plane,
 }
 
 struct Scene {
     models: Vec<Model>,
     instances: Vec<Instance>,
     camera: Camera,
+    clipping_planes: ClippingPlanes,
 }
 
-struct Triangle {
+#[derive(Clone)]
+struct ModelTriangle {
     vertices: [usize; 3],
     color: Color,
+}
+
+struct Instance {
+    model_index: usize,
+    translation: Vec4,
+    scaling: Vec3,
+    rotation: Vec3,
 }
 
 impl Instance {
@@ -61,7 +73,7 @@ impl Instance {
 }
 
 impl Model {
-    fn new(vertices: Vec<Vec4>, triangles: Vec<Triangle>) -> Self {
+    fn new(vertices: Vec<Vec4>, triangles: Vec<ModelTriangle>) -> Self {
         Model {
             vertices,
             triangles,
@@ -69,69 +81,135 @@ impl Model {
     }
 }
 
-impl Triangle {
+impl ModelTriangle {
     fn new(vertices: [usize; 3], color: Color) -> Self {
-        Triangle { vertices, color }
+        ModelTriangle { vertices, color }
     }
 }
 
-fn render_scene<T>(
-    canvas: &mut Canvas<T>,
-    scene: &Scene
-) -> RenderResult
+fn create_camera_transform(camera: &Camera) -> Mat4 {
+    let c_t = translation(-camera.translation);
+    let c_rx = rotation_x(-camera.rotation[0]);
+    let c_ry = rotation_y(-camera.rotation[1]);
+    let c_rz = rotation_z(-camera.rotation[2]);
+    c_rx * c_ry * c_rz * c_t
+}
+
+fn create_instance_transform(instance: &Instance) -> Mat4 {
+    let i_t = translation(instance.translation);
+    let i_s = scaling(instance.scaling);
+    let i_r = rotation(instance.rotation);
+    i_t * i_r * i_s
+}
+
+fn projected_to_point(v: Vec3) -> Point {
+    let x = v[0] / v[2];
+    let y = v[1] / v[2];
+    Point::new(x as i32, y as i32)
+}
+
+fn index_range<T>(v: &Vec<T>) -> core::ops::Range<usize> {
+    0..v.len()
+}
+
+fn render_scene<T>(canvas: &mut Canvas<T>, scene: &Scene) -> RenderResult
 where
     T: RenderTarget,
 {
     let m_projection = {
         let p = perspective_projection(D);
-        let m =
-            viewport_to_canvas(CANVAS_WIDTH, CANVAS_HEIGHT, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+        let m = viewport_to_canvas(CANVAS_WIDTH, CANVAS_HEIGHT, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
         m * p
     };
-    let m_camera = {
-        let c_t = translation(-scene.camera.translation);
-        let c_rx = rotation_x(-scene.camera.rotation[0]);
-        let c_ry = rotation_y(-scene.camera.rotation[1]);
-        let c_rz = rotation_z(-scene.camera.rotation[2]);
-        c_rx * c_ry * c_rz * c_t
-    };
+
+    let camera_transform = create_camera_transform(&scene.camera);
 
     for instance in scene.instances.iter() {
+        let transform = camera_transform * create_instance_transform(&instance);
         let model = &scene.models[instance.model_index];
-
-        let f = {
-            let m_model = {
-                let i_t = translation(instance.translation);
-                let i_s = scaling(instance.scaling);
-                let i_r = rotation(instance.rotation);
-                i_t * i_r * i_s
-            };
-            m_projection * m_camera * m_model
-        };
-
-        let mut projected = vec![];
-        for &v in model.vertices.iter() {
-            let v = f * v;
-
-            let x = v[0] / v[2];
-            let y = v[1] / v[2];
-            let p = Point::new(x as i32, y as i32);
-
-            projected.push(p);
-        }
-
         for triangle in model.triangles.iter() {
-            canvas.set_draw_color(triangle.color);
-            draw_wireframe_triangle(
-                canvas,
-                projected[triangle.vertices[0]],
-                projected[triangle.vertices[1]],
-                projected[triangle.vertices[2]],
-            )?;
+            let triangle_data = [
+                model.vertices[triangle.vertices[0]],
+                model.vertices[triangle.vertices[1]],
+                model.vertices[triangle.vertices[2]],
+            ];
+            let transformed_triangle_data = [
+                transform * triangle_data[0],
+                transform * triangle_data[1],
+                transform * triangle_data[2],
+            ];
+            for clipped_triangle in clip_triangle(transformed_triangle_data, &scene.clipping_planes.near) {
+                for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.left) {
+                    for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.right) {
+                        for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.bottom) {
+                            for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.top) {
+                                let triangle_points = [
+                                    projected_to_point(m_projection * clipped_triangle[0]),
+                                    projected_to_point(m_projection * clipped_triangle[1]),
+                                    projected_to_point(m_projection * clipped_triangle[2]),
+                                ];    
+                                canvas.set_draw_color(triangle.color);
+                                draw_wireframe_triangle(canvas, triangle_points[0], triangle_points[1], triangle_points[2])?;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+fn clip_triangle(triangle: [Vec4; 3], plane: &Plane) -> Vec<[Vec4;3]> {
+    let mut clipped_triangles = Vec::with_capacity(3);
+    
+    let d = [
+        plane.signed_distance(triangle[0]),
+        plane.signed_distance(triangle[1]),
+        plane.signed_distance(triangle[2]),
+    ];
+
+    let mut positive = Vec::with_capacity(3);
+    let mut negative = Vec::with_capacity(3);
+
+    for i in 0..3 {
+        if d[i] > 0.0 {
+            positive.push(i);
+        } else {
+            negative.push(i);
+        }
+    }
+
+    match positive.len() {
+        3 => {
+            clipped_triangles.push(triangle);
+        }
+        2 => {
+            let a = triangle[positive[0]];
+            let b = triangle[positive[1]];
+            let c = triangle[negative[0]];
+
+            let a_prime = plane.intersection(a, c);
+            let b_prime = plane.intersection(b, c);
+
+            clipped_triangles.push([a, b, b_prime]);
+            clipped_triangles.push([a_prime, b, b_prime]);
+        }
+        1 => {
+            let a = triangle[positive[0]];
+            let b = triangle[negative[0]];
+            let c = triangle[negative[1]];
+
+            let b_prime = plane.intersection(a, b);
+            let c_prime = plane.intersection(a, c);
+
+            clipped_triangles.push([a, b_prime, c_prime]);
+        }
+    _ => (),
+    }
+    
+    clipped_triangles
 }
 
 fn build_scene() -> Scene {
@@ -147,18 +225,18 @@ fn build_scene() -> Scene {
     ];
 
     let triangles = vec![
-        Triangle::new([0, 1, 2], Color::RED),
-        Triangle::new([0, 2, 3], Color::RED),
-        Triangle::new([4, 0, 3], Color::GREEN),
-        Triangle::new([4, 3, 7], Color::GREEN),
-        Triangle::new([5, 4, 7], Color::BLUE),
-        Triangle::new([5, 7, 6], Color::BLUE),
-        Triangle::new([1, 5, 6], Color::YELLOW),
-        Triangle::new([1, 6, 2], Color::YELLOW),
-        Triangle::new([4, 5, 1], Color::MAGENTA),
-        Triangle::new([4, 1, 0], Color::MAGENTA),
-        Triangle::new([2, 6, 7], Color::CYAN),
-        Triangle::new([2, 7, 3], Color::CYAN),
+        ModelTriangle::new([0, 1, 2], Color::RED),
+        ModelTriangle::new([0, 2, 3], Color::RED),
+        ModelTriangle::new([4, 0, 3], Color::GREEN),
+        ModelTriangle::new([4, 3, 7], Color::GREEN),
+        ModelTriangle::new([5, 4, 7], Color::BLUE),
+        ModelTriangle::new([5, 7, 6], Color::BLUE),
+        ModelTriangle::new([1, 5, 6], Color::YELLOW),
+        ModelTriangle::new([1, 6, 2], Color::YELLOW),
+        ModelTriangle::new([4, 5, 1], Color::MAGENTA),
+        ModelTriangle::new([4, 1, 0], Color::MAGENTA),
+        ModelTriangle::new([2, 6, 7], Color::CYAN),
+        ModelTriangle::new([2, 7, 3], Color::CYAN),
     ];
 
     let models = vec![Model::new(vertices, triangles)];
@@ -175,7 +253,27 @@ fn build_scene() -> Scene {
         rotation: Vec3::new(0.0, 0.0, 0.0),
     };
 
-    Scene { models, instances, camera }
+    let clipping_planes = {
+        let near = Plane::new(Vec4::new(0.0, 0.0, 1.0, 0.0), -D);
+        let left = Plane::new(Vec4::new(1.0, 0.0, 1.0, 0.0), 0.0);
+        let right = Plane::new(Vec4::new(-1.0, 0.0, 1.0, 0.0), 0.0);
+        let bottom = Plane::new(Vec4::new(0.0, 1.0, 1.0, 0.0), 0.0);
+        let top = Plane::new(Vec4::new(0.0, -1.0, 1.0, 0.0), 0.0);
+        ClippingPlanes {
+            near,
+            left,
+            right,
+            bottom,
+            top
+        }
+    };
+
+    Scene {
+        models,
+        instances,
+        camera,
+        clipping_planes,
+    }
 }
 
 fn update_scene(scene: &mut Scene, t: f32) {
@@ -186,7 +284,7 @@ fn update_scene(scene: &mut Scene, t: f32) {
 
     let rad = 2.0;
 
-    scene.camera.rotation = Vec3::new(0.0, t.sin()/4.0, 0.0);
+    scene.camera.rotation = Vec3::new(0.0, t * 0.1, 0.0);
 
     scene.instances[0].translation = Vec4::new(rad * t.cos(), rad * t.sin(), 7.0, 0.0);
     scene.instances[1].translation = Vec4::new(rad * t14.cos(), rad * t14.sin(), 7.0, 0.0);
