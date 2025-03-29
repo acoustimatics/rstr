@@ -214,7 +214,7 @@ where
 
 /// Converts a point from plane space to canvas space. Plane space is like
 /// canvas space, except the origin is in the middle of the canvas.
-fn plane_to_canvas(p: Point) -> Point {
+pub fn plane_to_canvas(p: Point) -> Point {
     Point::new(
         (CANVAS_WIDTH as i32) / 2 + p.x,
         (CANVAS_HEIGHT as i32) / 2 - p.y,

@@ -61,6 +61,13 @@ struct Instance {
     rotation: Vec3,
 }
 
+#[derive(Clone, Copy)]
+struct ProjectedPoint {
+    x: f32,
+    y: f32,
+    depth: f32,
+}
+
 impl Instance {
     fn new(model_index: usize) -> Self {
         Instance {
@@ -102,20 +109,99 @@ fn create_instance_transform(instance: &Instance) -> Mat4 {
     i_t * i_r * i_s
 }
 
-fn projected_to_point(v: Vec3) -> Point {
+fn projected_to_point(v: Vec3) -> ProjectedPoint {
     let x = v[0] / v[2];
     let y = v[1] / v[2];
-    Point::new(x as i32, y as i32)
+    let depth = 1.0 / v[2];
+    ProjectedPoint { x, y, depth }
 }
 
 fn index_range<T>(v: &Vec<T>) -> core::ops::Range<usize> {
     0..v.len()
 }
 
-fn render_scene<T>(canvas: &mut Canvas<T>, scene: &Scene) -> RenderResult
+fn i32_range(x: f32, y: f32) -> core::ops::Range<i32> {
+    (x as i32)..(y as i32)
+}
+
+fn i32_range_inclusive(x: f32, y: f32) -> core::ops::RangeInclusive<i32> {
+    (x as i32)..=(y as i32)
+}
+
+fn min_to_max(x: f32, y: f32) -> (f32, f32) {
+    if x > y {
+        (y, x)
+    } else {
+        (x, y)
+    }
+}
+
+fn is_in_canvas(x: i32, y: i32) -> bool {
+    x >= 0 && x < CANVAS_WIDTH as i32 && y >= 0 && y < CANVAS_HEIGHT as i32
+}
+
+fn x_slope(p: ProjectedPoint, q: ProjectedPoint) -> f32 {
+    (q.x - p.x) / (q.y - p.y)
+}
+
+#[derive(Clone, Copy)]
+enum Draw {
+    Depths,
+    Pixels,
+}
+
+fn draw_line_horizontal<T>(
+    canvas: &mut Canvas<T>,
+    depth_buffer: &mut [f32],
+    x_long: f32,
+    x_short: f32,
+    d_long: f32,
+    d_short: f32,
+    y: i32,
+    color: Color,
+    draw: Draw,
+) -> RenderResult
 where
     T: RenderTarget,
 {
+    let (x0, d0, x1, d1) = if x_long > x_short {
+        (x_short, d_short, x_long, d_long)
+    } else {
+        (x_long, d_long, x_short, d_short)
+    };
+    let d_slope = (d1 - d0) / (x1 - x0);
+    let mut d = d0;
+    for x in i32_range_inclusive(x0, x1) {
+        let p = Point::new(x, y);
+        let p = plane_to_canvas(p);
+        if is_in_canvas(p.x, p.y) {
+            let y = p.y as usize;
+            let x = p.x as usize;
+            let w = CANVAS_WIDTH as usize;
+            let depth_index = y * w + x;
+            if d > depth_buffer[depth_index] {
+                depth_buffer[depth_index] = d;
+                let c = match draw {
+                    Draw::Depths => {
+                        let c = (255.0 * d) as u8;
+                        Color::RGB(c, c, c)
+                    }
+                    Draw::Pixels => color,
+                };
+                canvas.set_draw_color(c);
+                canvas.draw_point(p)?;
+            }
+        }
+        d += d_slope;
+    }
+    Ok(())
+}
+
+fn render_scene<T>(canvas: &mut Canvas<T>, scene: &Scene, draw: Draw) -> RenderResult
+where
+    T: RenderTarget,
+{
+    let mut depth_buffer = [0.0; (CANVAS_WIDTH * CANVAS_HEIGHT) as usize];
     let m_projection = {
         let p = perspective_projection(D);
         let m = viewport_to_canvas(CANVAS_WIDTH, CANVAS_HEIGHT, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
@@ -138,18 +224,77 @@ where
                 transform * triangle_data[1],
                 transform * triangle_data[2],
             ];
-            for clipped_triangle in clip_triangle(transformed_triangle_data, &scene.clipping_planes.near) {
-                for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.left) {
-                    for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.right) {
-                        for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.bottom) {
-                            for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.top) {
-                                let triangle_points = [
-                                    projected_to_point(m_projection * clipped_triangle[0]),
-                                    projected_to_point(m_projection * clipped_triangle[1]),
-                                    projected_to_point(m_projection * clipped_triangle[2]),
-                                ];    
-                                canvas.set_draw_color(triangle.color);
-                                draw_wireframe_triangle(canvas, triangle_points[0], triangle_points[1], triangle_points[2])?;
+            for clipped_triangle in
+                clip_triangle(transformed_triangle_data, &scene.clipping_planes.near)
+            {
+                for clipped_triangle in clip_triangle(clipped_triangle, &scene.clipping_planes.left)
+                {
+                    for clipped_triangle in
+                        clip_triangle(clipped_triangle, &scene.clipping_planes.right)
+                    {
+                        for clipped_triangle in
+                            clip_triangle(clipped_triangle, &scene.clipping_planes.bottom)
+                        {
+                            for clipped_triangle in
+                                clip_triangle(clipped_triangle, &scene.clipping_planes.top)
+                            {
+                                let p = {
+                                    let mut p = [
+                                        projected_to_point(m_projection * clipped_triangle[0]),
+                                        projected_to_point(m_projection * clipped_triangle[1]),
+                                        projected_to_point(m_projection * clipped_triangle[2]),
+                                    ];
+                                    p.sort_by(|p, q| p.y.total_cmp(&q.y));
+                                    p
+                                };
+
+                                let x_slope_long = x_slope(p[0], p[2]);
+                                let x_slope_short = x_slope(p[0], p[1]);
+                                let d_slope_long = (p[2].depth - p[0].depth) / (p[2].y - p[0].y);
+                                let d_slope_short = (p[1].depth - p[0].depth) / (p[1].y - p[0].y);
+                                let mut x_long = p[0].x;
+                                let mut x_short = p[0].x;
+                                let mut d_long = p[0].depth;
+                                let mut d_short = p[0].depth;
+                                for y in i32_range(p[0].y, p[1].y) {
+                                    draw_line_horizontal(
+                                        canvas,
+                                        &mut depth_buffer,
+                                        x_long,
+                                        x_short,
+                                        d_long,
+                                        d_short,
+                                        y,
+                                        triangle.color,
+                                        draw,
+                                    )?;
+                                    x_long += x_slope_long;
+                                    x_short += x_slope_short;
+                                    d_long += d_slope_long;
+                                    d_short += d_slope_short;
+                                }
+
+                                let x_slope_short = x_slope(p[1], p[2]);
+                                let d_slope_short = (p[2].depth - p[1].depth) / (p[2].y - p[1].y);
+                                let mut x_short = p[1].x;
+                                let mut d_short = p[1].depth;
+                                for y in i32_range(p[1].y, p[2].y) {
+                                    draw_line_horizontal(
+                                        canvas,
+                                        &mut depth_buffer,
+                                        x_long,
+                                        x_short,
+                                        d_long,
+                                        d_short,
+                                        y,
+                                        triangle.color,
+                                        draw,
+                                    )?;
+                                    x_long += x_slope_long;
+                                    x_short += x_slope_short;
+                                    d_long += d_slope_long;
+                                    d_short += d_slope_short;
+                                }
                             }
                         }
                     }
@@ -161,9 +306,9 @@ where
     Ok(())
 }
 
-fn clip_triangle(triangle: [Vec4; 3], plane: &Plane) -> Vec<[Vec4;3]> {
+fn clip_triangle(triangle: [Vec4; 3], plane: &Plane) -> Vec<[Vec4; 3]> {
     let mut clipped_triangles = Vec::with_capacity(3);
-    
+
     let d = [
         plane.signed_distance(triangle[0]),
         plane.signed_distance(triangle[1]),
@@ -206,9 +351,9 @@ fn clip_triangle(triangle: [Vec4; 3], plane: &Plane) -> Vec<[Vec4;3]> {
 
             clipped_triangles.push([a, b_prime, c_prime]);
         }
-    _ => (),
+        _ => (),
     }
-    
+
     clipped_triangles
 }
 
@@ -249,7 +394,7 @@ fn build_scene() -> Scene {
     ];
 
     let camera = Camera {
-        translation: Vec4::new(-1.0, 0.0, 0.0, 0.0),
+        translation: Vec4::new(0.0, 0.0, 0.0, 0.0),
         rotation: Vec3::new(0.0, 0.0, 0.0),
     };
 
@@ -264,7 +409,7 @@ fn build_scene() -> Scene {
             left,
             right,
             bottom,
-            top
+            top,
         }
     };
 
@@ -284,7 +429,7 @@ fn update_scene(scene: &mut Scene, t: f32) {
 
     let rad = 2.0;
 
-    scene.camera.rotation = Vec3::new(0.0, t * 0.1, 0.0);
+    //scene.camera.rotation = Vec3::new(0.0, t * 0.1, 0.0);
 
     scene.instances[0].translation = Vec4::new(rad * t.cos(), rad * t.sin(), 7.0, 0.0);
     scene.instances[1].translation = Vec4::new(rad * t14.cos(), rad * t14.sin(), 7.0, 0.0);
@@ -310,6 +455,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut scene = build_scene();
     let mut t = 0.0;
     let mut event_pump = sdl.event_pump()?;
+    let mut draw = Draw::Pixels;
     'main_loop: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -320,6 +466,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } => {
                     break 'main_loop;
                 }
+                Event::KeyDown {
+                    keycode: Some(Keycode::D),
+                    ..
+                } => {
+                    draw = Draw::Depths;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::P),
+                    ..
+                } => {
+                    draw = Draw::Pixels;
+                }
                 _ => {}
             }
         }
@@ -328,7 +486,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         canvas.set_draw_color(Color::RGB(0x00, 0x00, 0x00));
         canvas.clear();
-        render_scene(&mut canvas, &scene)?;
+        render_scene(&mut canvas, &scene, draw)?;
         canvas.present();
 
         t += 0.001;
