@@ -21,6 +21,17 @@ impl Vec4 {
         Vec4([x, y, z, w])
     }
 
+    pub fn cross(self, rhs: Vec4) -> Vec4 {
+        let (a1, a2, a3) = (self[0], self[1], self[2]);
+        let (b1, b2, b3) = (rhs[0], rhs[1], rhs[2]);
+        Vec4::new(
+            a2 * b3 - a3 * b2,
+            -a1 * b3 + a3 * b1,
+            a1 * b2 - a2 * b1,
+            0.0,
+        )
+    }
+
     pub fn dot(self, rhs: Vec4) -> f32 {
         self[0] * rhs[0] + self[1] * rhs[1] + self[2] * rhs[2]
     }

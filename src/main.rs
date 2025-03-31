@@ -23,6 +23,21 @@ const VIEWPORT_WIDTH: f32 = 1.0;
 const VIEWPORT_HEIGHT: f32 = 1.0;
 const D: f32 = 1.0;
 
+#[derive(Clone, Copy, PartialEq)]
+enum Switch {
+    Off,
+    On,
+}
+
+impl Switch {
+    fn toggle(self) -> Self {
+        match self {
+            Self::On => Self::Off,
+            Self::Off => Self::On,
+        }
+    }
+}
+
 struct Camera {
     translation: Vec4,
     rotation: Vec3,
@@ -31,6 +46,7 @@ struct Camera {
 struct Model {
     vertices: Vec<Vec4>,
     triangles: Vec<ModelTriangle>,
+    normals: Vec<Vec4>,
 }
 
 struct ClippingPlanes {
@@ -81,9 +97,17 @@ impl Instance {
 
 impl Model {
     fn new(vertices: Vec<Vec4>, triangles: Vec<ModelTriangle>) -> Self {
+        let mut normals = Vec::new();
+        for triangle in triangles.iter() {
+            let v1 = vertices[triangle.vertices[1]] - vertices[triangle.vertices[0]];
+            let v2 = vertices[triangle.vertices[2]] - vertices[triangle.vertices[0]];
+            let normal = v1.cross(v2).normalize();
+            normals.push(normal);
+        }
         Model {
             vertices,
             triangles,
+            normals,
         }
     }
 }
@@ -148,6 +172,7 @@ fn x_slope(p: ProjectedPoint, q: ProjectedPoint) -> f32 {
 enum Draw {
     Depths,
     Pixels,
+    Wireframe,
 }
 
 fn draw_line_horizontal<T>(
@@ -186,7 +211,7 @@ where
                         let c = (255.0 * d) as u8;
                         Color::RGB(c, c, c)
                     }
-                    Draw::Pixels => color,
+                    _ => color,
                 };
                 canvas.set_draw_color(c);
                 canvas.draw_point(p)?;
@@ -197,7 +222,7 @@ where
     Ok(())
 }
 
-fn render_scene<T>(canvas: &mut Canvas<T>, scene: &Scene, draw: Draw) -> RenderResult
+fn render_scene<T>(canvas: &mut Canvas<T>, scene: &Scene, draw: Draw, cull_backfaces: Switch) -> RenderResult
 where
     T: RenderTarget,
 {
@@ -213,7 +238,7 @@ where
     for instance in scene.instances.iter() {
         let transform = camera_transform * create_instance_transform(&instance);
         let model = &scene.models[instance.model_index];
-        for triangle in model.triangles.iter() {
+        for (triangle_index, triangle) in model.triangles.iter().enumerate() {
             let triangle_data = [
                 model.vertices[triangle.vertices[0]],
                 model.vertices[triangle.vertices[1]],
@@ -224,6 +249,18 @@ where
                 transform * triangle_data[1],
                 transform * triangle_data[2],
             ];
+
+            // back-face culling
+            if cull_backfaces == Switch::On {
+                let normal = model.normals[triangle_index];
+                let transformed_normal = transform * normal;
+                let view_vector = transformed_triangle_data[0]; // camera always at origin.
+                let normal_dot_view = transformed_normal.dot(view_vector);
+                if normal_dot_view >= 0.0 {
+                    continue;
+                }
+            }
+
             for clipped_triangle in
                 clip_triangle(transformed_triangle_data, &scene.clipping_planes.near)
             {
@@ -238,15 +275,26 @@ where
                             for clipped_triangle in
                                 clip_triangle(clipped_triangle, &scene.clipping_planes.top)
                             {
-                                let p = {
-                                    let mut p = [
-                                        projected_to_point(m_projection * clipped_triangle[0]),
-                                        projected_to_point(m_projection * clipped_triangle[1]),
-                                        projected_to_point(m_projection * clipped_triangle[2]),
-                                    ];
-                                    p.sort_by(|p, q| p.y.total_cmp(&q.y));
-                                    p
-                                };
+                                let mut p = [
+                                    projected_to_point(m_projection * clipped_triangle[0]),
+                                    projected_to_point(m_projection * clipped_triangle[1]),
+                                    projected_to_point(m_projection * clipped_triangle[2]),
+                                ];
+
+
+                                match draw {
+                                    Draw::Wireframe => {
+                                        canvas.set_draw_color(triangle.color);
+                                        let p0 = Point::new(p[0].x as i32, p[0].y as i32);
+                                        let p1 = Point::new(p[1].x as i32, p[1].y as i32);
+                                        let p2 = Point::new(p[2].x as i32, p[2].y as i32);
+                                        draw_wireframe_triangle(canvas, p0, p1, p2)?;
+                                        continue;
+                                    }
+                                    _ => ()
+                                }
+
+                                p.sort_by(|p, q| p.y.total_cmp(&q.y));
 
                                 let x_slope_long = x_slope(p[0], p[2]);
                                 let x_slope_short = x_slope(p[0], p[1]);
@@ -456,6 +504,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut t = 0.0;
     let mut event_pump = sdl.event_pump()?;
     let mut draw = Draw::Pixels;
+    let mut cull_backfaces = Switch::On;
     'main_loop: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -478,6 +527,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } => {
                     draw = Draw::Pixels;
                 }
+                Event::KeyDown {
+                    keycode: Some(Keycode::W),
+                    ..
+                } => {
+                    draw = Draw::Wireframe;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::C),
+                    ..
+                } => {
+                    cull_backfaces = cull_backfaces.toggle();
+                }
                 _ => {}
             }
         }
@@ -486,7 +547,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         canvas.set_draw_color(Color::RGB(0x00, 0x00, 0x00));
         canvas.clear();
-        render_scene(&mut canvas, &scene, draw)?;
+        render_scene(&mut canvas, &scene, draw, cull_backfaces)?;
         canvas.present();
 
         t += 0.001;
