@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
 mod gfx;
 mod math;
 
@@ -140,24 +137,12 @@ fn projected_to_point(v: Vec3) -> ProjectedPoint {
     ProjectedPoint { x, y, depth }
 }
 
-fn index_range<T>(v: &Vec<T>) -> core::ops::Range<usize> {
-    0..v.len()
-}
-
 fn i32_range(x: f32, y: f32) -> core::ops::Range<i32> {
     (x as i32)..(y as i32)
 }
 
 fn i32_range_inclusive(x: f32, y: f32) -> core::ops::RangeInclusive<i32> {
     (x as i32)..=(y as i32)
-}
-
-fn min_to_max(x: f32, y: f32) -> (f32, f32) {
-    if x > y {
-        (y, x)
-    } else {
-        (x, y)
-    }
 }
 
 fn is_in_canvas(x: i32, y: i32) -> bool {
