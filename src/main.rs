@@ -17,7 +17,7 @@ use gfx::*;
 use math::plane::*;
 use math::transform::*;
 use math::vec::*;
-use math::{mat::*, transform};
+use math::mat::*;
 
 const VIEWPORT_WIDTH: f32 = 1.0;
 const VIEWPORT_HEIGHT: f32 = 1.0;
