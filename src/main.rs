@@ -42,6 +42,7 @@ struct Camera {
 
 struct Model {
     vertices: Vec<Vec4>,
+    colors: Vec<ColorF32>,
     triangles: Vec<ModelTriangle>,
     normals: Vec<Vec4>,
 }
@@ -64,7 +65,7 @@ struct Scene {
 #[derive(Clone)]
 struct ModelTriangle {
     vertices: [usize; 3],
-    color: ColorF32,
+    indices_color: [usize; 3],
 }
 
 struct Instance {
@@ -96,7 +97,7 @@ impl Instance {
 }
 
 impl Model {
-    fn new(vertices: Vec<Vec4>, triangles: Vec<ModelTriangle>) -> Self {
+    fn new(vertices: Vec<Vec4>, colors: Vec<ColorF32>, triangles: Vec<ModelTriangle>) -> Self {
         let mut normals = Vec::new();
         for triangle in triangles.iter() {
             let v1 = vertices[triangle.vertices[1]] - vertices[triangle.vertices[0]];
@@ -106,6 +107,7 @@ impl Model {
         }
         Model {
             vertices,
+            colors,
             triangles,
             normals,
         }
@@ -113,8 +115,8 @@ impl Model {
 }
 
 impl ModelTriangle {
-    fn new(vertices: [usize; 3], color: ColorF32) -> Self {
-        ModelTriangle { vertices, color }
+    fn new(vertices: [usize; 3], indices_color: [usize; 3]) -> Self {
+        ModelTriangle { vertices, indices_color }
     }
 }
 
@@ -233,6 +235,11 @@ where
                 model.vertices[triangle.vertices[1]],
                 model.vertices[triangle.vertices[2]],
             ];
+            let colors_triangle = [
+                model.colors[triangle.indices_color[0]],
+                model.colors[triangle.indices_color[1]],
+                model.colors[triangle.indices_color[2]],
+            ];
             let transformed_triangle_data = [
                 transform * triangle_data[0],
                 transform * triangle_data[1],
@@ -265,9 +272,9 @@ where
                                 clip_triangle(clipped_triangle, &scene.clipping_planes.top)
                             {
                                 let mut p = [
-                                    projected_to_point(m_projection * clipped_triangle[0], triangle.color),
-                                    projected_to_point(m_projection * clipped_triangle[1], triangle.color),
-                                    projected_to_point(m_projection * clipped_triangle[2], triangle.color),
+                                    projected_to_point(m_projection * clipped_triangle[0], colors_triangle[0]),
+                                    projected_to_point(m_projection * clipped_triangle[1], colors_triangle[1]),
+                                    projected_to_point(m_projection * clipped_triangle[2], colors_triangle[2]),
                                 ];
 
                                 match draw {
@@ -407,23 +414,32 @@ fn build_scene() -> Scene {
         Vec4::new(-1.0, -1.0, -1.0, 1.0),
         Vec4::new(1.0, -1.0, -1.0, 1.0),
     ];
-
-    let triangles = vec![
-        ModelTriangle::new([0, 1, 2], ColorF32::RED),
-        ModelTriangle::new([0, 2, 3], ColorF32::MAGENTA),
-        ModelTriangle::new([4, 0, 3], ColorF32::GREEN),
-        ModelTriangle::new([4, 3, 7], ColorF32::YELLOW),
-        ModelTriangle::new([5, 4, 7], ColorF32::BLUE),
-        ModelTriangle::new([5, 7, 6], ColorF32::CYAN),
-        ModelTriangle::new([1, 5, 6], ColorF32::RED),
-        ModelTriangle::new([1, 6, 2], ColorF32::YELLOW),
-        ModelTriangle::new([4, 5, 1], ColorF32::BLUE),
-        ModelTriangle::new([4, 1, 0], ColorF32::MAGENTA),
-        ModelTriangle::new([2, 6, 7], ColorF32::GREEN),
-        ModelTriangle::new([2, 7, 3], ColorF32::CYAN),
+    
+    let colors = vec![
+        ColorF32::RED, // 0
+        ColorF32::GREEN, // 1
+        ColorF32::BLUE, // 2
+        ColorF32::YELLOW, // 3
+        ColorF32::MAGENTA, // 4
+        ColorF32::CYAN, // 5
     ];
 
-    let models = vec![Model::new(vertices, triangles)];
+    let triangles = vec![
+        ModelTriangle::new([0, 1, 2], [0, 0, 0]),
+        ModelTriangle::new([0, 2, 3], [0, 0, 0]),
+        ModelTriangle::new([4, 0, 3], [1, 1, 1]),
+        ModelTriangle::new([4, 3, 7], [1, 1, 1]),
+        ModelTriangle::new([5, 4, 7], [2, 2, 2]),
+        ModelTriangle::new([5, 7, 6], [2, 2, 2]),
+        ModelTriangle::new([1, 5, 6], [3, 3, 3]),
+        ModelTriangle::new([1, 6, 2], [3, 3, 3]),
+        ModelTriangle::new([4, 5, 1], [4, 4, 4]),
+        ModelTriangle::new([4, 1, 0], [4, 4, 4]),
+        ModelTriangle::new([2, 6, 7], [5, 5, 5]),
+        ModelTriangle::new([2, 7, 3], [5, 5, 5]),
+    ];
+
+    let models = vec![Model::new(vertices, colors, triangles)];
 
     let instances = vec![
         Instance::new(0),
