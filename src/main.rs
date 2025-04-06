@@ -64,7 +64,7 @@ struct Scene {
 #[derive(Clone)]
 struct ModelTriangle {
     vertices: [usize; 3],
-    color: Color,
+    color: ColorF32,
 }
 
 struct Instance {
@@ -75,10 +75,13 @@ struct Instance {
 }
 
 #[derive(Clone, Copy)]
-struct ProjectedPoint {
+struct VertexProjected {
     x: f32,
     y: f32,
     depth: f32,
+    r: f32,
+    g: f32,
+    b: f32,
 }
 
 impl Instance {
@@ -110,7 +113,7 @@ impl Model {
 }
 
 impl ModelTriangle {
-    fn new(vertices: [usize; 3], color: Color) -> Self {
+    fn new(vertices: [usize; 3], color: ColorF32) -> Self {
         ModelTriangle { vertices, color }
     }
 }
@@ -130,11 +133,12 @@ fn create_instance_transform(instance: &Instance) -> Mat4 {
     i_t * i_r * i_s
 }
 
-fn projected_to_point(v: Vec3) -> ProjectedPoint {
+fn projected_to_point(v: Vec3, color: ColorF32) -> VertexProjected {
     let x = v[0] / v[2];
     let y = v[1] / v[2];
     let depth = 1.0 / v[2];
-    ProjectedPoint { x, y, depth }
+    let (r, g, b) = color.rgb();
+    VertexProjected { x, y, depth, r, g, b }
 }
 
 fn i32_range(x: f32, y: f32) -> core::ops::Range<i32> {
@@ -149,7 +153,7 @@ fn is_in_canvas(x: i32, y: i32) -> bool {
     x >= 0 && x < CANVAS_WIDTH as i32 && y >= 0 && y < CANVAS_HEIGHT as i32
 }
 
-fn x_slope(p: ProjectedPoint, q: ProjectedPoint) -> f32 {
+fn x_slope(p: VertexProjected, q: VertexProjected) -> f32 {
     (q.x - p.x) / (q.y - p.y)
 }
 
@@ -261,15 +265,15 @@ where
                                 clip_triangle(clipped_triangle, &scene.clipping_planes.top)
                             {
                                 let mut p = [
-                                    projected_to_point(m_projection * clipped_triangle[0]),
-                                    projected_to_point(m_projection * clipped_triangle[1]),
-                                    projected_to_point(m_projection * clipped_triangle[2]),
+                                    projected_to_point(m_projection * clipped_triangle[0], triangle.color),
+                                    projected_to_point(m_projection * clipped_triangle[1], triangle.color),
+                                    projected_to_point(m_projection * clipped_triangle[2], triangle.color),
                                 ];
-
 
                                 match draw {
                                     Draw::Wireframe => {
-                                        canvas.set_draw_color(triangle.color);
+                                        let color = create_color_sdl(p[0].r, p[0].g, p[0].b);
+                                        canvas.set_draw_color(color);
                                         let p0 = Point::new(p[0].x as i32, p[0].y as i32);
                                         let p1 = Point::new(p[1].x as i32, p[1].y as i32);
                                         let p2 = Point::new(p[2].x as i32, p[2].y as i32);
@@ -280,6 +284,8 @@ where
                                 }
 
                                 p.sort_by(|p, q| p.y.total_cmp(&q.y));
+
+                                let color = create_color_sdl(p[0].r, p[0].g, p[0].b);
 
                                 let x_slope_long = x_slope(p[0], p[2]);
                                 let x_slope_short = x_slope(p[0], p[1]);
@@ -298,7 +304,7 @@ where
                                         d_long,
                                         d_short,
                                         y,
-                                        triangle.color,
+                                        color,
                                         draw,
                                     )?;
                                     x_long += x_slope_long;
@@ -320,7 +326,7 @@ where
                                         d_long,
                                         d_short,
                                         y,
-                                        triangle.color,
+                                        color,
                                         draw,
                                     )?;
                                     x_long += x_slope_long;
@@ -403,18 +409,18 @@ fn build_scene() -> Scene {
     ];
 
     let triangles = vec![
-        ModelTriangle::new([0, 1, 2], Color::RED),
-        ModelTriangle::new([0, 2, 3], Color::RED),
-        ModelTriangle::new([4, 0, 3], Color::GREEN),
-        ModelTriangle::new([4, 3, 7], Color::GREEN),
-        ModelTriangle::new([5, 4, 7], Color::BLUE),
-        ModelTriangle::new([5, 7, 6], Color::BLUE),
-        ModelTriangle::new([1, 5, 6], Color::YELLOW),
-        ModelTriangle::new([1, 6, 2], Color::YELLOW),
-        ModelTriangle::new([4, 5, 1], Color::MAGENTA),
-        ModelTriangle::new([4, 1, 0], Color::MAGENTA),
-        ModelTriangle::new([2, 6, 7], Color::CYAN),
-        ModelTriangle::new([2, 7, 3], Color::CYAN),
+        ModelTriangle::new([0, 1, 2], ColorF32::RED),
+        ModelTriangle::new([0, 2, 3], ColorF32::MAGENTA),
+        ModelTriangle::new([4, 0, 3], ColorF32::GREEN),
+        ModelTriangle::new([4, 3, 7], ColorF32::YELLOW),
+        ModelTriangle::new([5, 4, 7], ColorF32::BLUE),
+        ModelTriangle::new([5, 7, 6], ColorF32::CYAN),
+        ModelTriangle::new([1, 5, 6], ColorF32::RED),
+        ModelTriangle::new([1, 6, 2], ColorF32::YELLOW),
+        ModelTriangle::new([4, 5, 1], ColorF32::BLUE),
+        ModelTriangle::new([4, 1, 0], ColorF32::MAGENTA),
+        ModelTriangle::new([2, 6, 7], ColorF32::GREEN),
+        ModelTriangle::new([2, 7, 3], ColorF32::CYAN),
     ];
 
     let models = vec![Model::new(vertices, triangles)];

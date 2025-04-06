@@ -1,5 +1,6 @@
 //! Graphics rendering code.
 
+use sdl2::pixels::Color;
 use sdl2::rect::Point;
 use sdl2::render::{Canvas, RenderTarget};
 use std::error::Error;
@@ -9,6 +10,15 @@ pub const CANVAS_WIDTH: u32 = 640;
 
 /// Height of canvas in pixels.
 pub const CANVAS_HEIGHT: u32 = 640;
+
+/// An RGB color where the channel values are floating point values between
+/// 0.0 and 1.0, inclusive.
+#[derive(Clone, Copy, Debug)]
+pub struct ColorF32 {
+    r: f32,
+    g: f32,
+    b: f32,
+}
 
 /// Allows for iterating through a sequence of interpolations between two
 /// values.
@@ -22,6 +32,23 @@ struct Interpolation {
 
 /// The result of a rendering function.
 pub type RenderResult = Result<(), Box<dyn Error>>;
+
+impl ColorF32 {
+    pub const fn new(r: f32, b: f32, g: f32) -> Self {
+        Self { r, g, b }
+    }
+    
+    pub fn rgb(self) -> (f32, f32, f32) {
+        (self.r, self.g, self.b)
+    }
+    
+    pub const RED: Self = Self::new(1.0, 0.0, 0.0);
+    pub const GREEN: Self = Self::new(0.0, 1.0, 0.0);
+    pub const BLUE: Self = Self::new(0.0, 0.0, 1.0);
+    pub const YELLOW: Self = Self::new(1.0, 1.0, 0.0);
+    pub const MAGENTA: Self = Self::new(1.0, 0.0, 1.0);
+    pub const CYAN: Self = Self::new(0.0, 1.0, 1.0);
+}
 
 impl Interpolation {
     fn new(i0: i32, d0: i32, i1: i32, d1: i32) -> Self {
@@ -50,6 +77,13 @@ impl Iterator for Interpolation {
             None
         }
     }
+}
+
+pub fn create_color_sdl(r: f32, g: f32, b: f32) -> Color {
+   let r = 255.0 * r;
+   let g = 255.0 * g;
+   let b = 255.0 * b;
+   Color::RGB(r as u8, g as u8, b as u8)
 }
 
 pub fn draw_line<T>(canvas: &mut Canvas<T>, p0: Point, p1: Point) -> RenderResult
