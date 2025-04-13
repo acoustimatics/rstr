@@ -34,7 +34,7 @@ struct Interpolation {
 pub type RenderResult = Result<(), Box<dyn Error>>;
 
 impl ColorF32 {
-    pub const fn new(r: f32, b: f32, g: f32) -> Self {
+    pub const fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
     }
     
@@ -42,6 +42,8 @@ impl ColorF32 {
         (self.r, self.g, self.b)
     }
     
+    pub const BLACK: Self = Self::new(0.0, 0.0, 0.0);
+    pub const WHITE: Self = Self::new(1.0, 1.0, 1.0);
     pub const RED: Self = Self::new(1.0, 0.0, 0.0);
     pub const GREEN: Self = Self::new(0.0, 1.0, 0.0);
     pub const BLUE: Self = Self::new(0.0, 0.0, 1.0);
@@ -80,9 +82,9 @@ impl Iterator for Interpolation {
 }
 
 pub fn create_color_sdl(r: f32, g: f32, b: f32) -> Color {
-   let r = 255.0 * r;
-   let g = 255.0 * g;
-   let b = 255.0 * b;
+   let r = 255.0 * r.clamp(0.0, 1.0);
+   let g = 255.0 * g.clamp(0.0, 1.0);
+   let b = 255.0 * b.clamp(0.0, 1.0);
    Color::RGB(r as u8, g as u8, b as u8)
 }
 

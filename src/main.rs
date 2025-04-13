@@ -40,6 +40,16 @@ struct Camera {
     rotation: Vec3,
 }
 
+#[derive(Clone, Copy)]
+struct Fragment {
+    x: f32,
+    y: f32,
+    depth: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+}
+
 struct Model {
     vertices: Vec<Vec4>,
     colors: Vec<ColorF32>,
@@ -75,14 +85,41 @@ struct Instance {
     rotation: Vec3,
 }
 
-#[derive(Clone, Copy)]
-struct VertexProjected {
-    x: f32,
-    y: f32,
-    depth: f32,
-    r: f32,
-    g: f32,
-    b: f32,
+impl Fragment {
+    fn slope_by_y(self, to: Self) -> Self {
+        let y_delta = to.y - self.y;
+        Self {
+            x: (to.x - self.x) / y_delta,
+            y: 1.0,
+            depth: (to.depth - self.depth) / y_delta,
+            r: (to.r - self.r) / y_delta,
+            g: (to.g - self.g) / y_delta,
+            b: (to.b - self.b) / y_delta,
+        }
+    }
+
+    fn slope_by_x(self, to: Self) -> Self {
+        let x_delta = to.x - self.x;
+        Self {
+            x: 1.0,
+            y: (to.y - self.y) / x_delta,
+            depth: (to.depth - self.depth) / x_delta,
+            r: (to.r - self.r) / x_delta,
+            g: (to.g - self.g) / x_delta,
+            b: (to.b - self.b) / x_delta,
+        }
+    }
+}
+
+impl std::ops::AddAssign for Fragment {
+   fn add_assign(&mut self, rhs: Self) {
+       self.x += rhs.x;
+       self.y += rhs.y;
+       self.depth += rhs.depth;
+       self.r += rhs.r;
+       self.g += rhs.g;
+       self.b += rhs.b;
+   } 
 }
 
 impl Instance {
@@ -135,12 +172,12 @@ fn create_instance_transform(instance: &Instance) -> Mat4 {
     i_t * i_r * i_s
 }
 
-fn projected_to_point(v: Vec3, color: ColorF32) -> VertexProjected {
+fn projected_to_point(v: Vec3, color: ColorF32) -> Fragment {
     let x = v[0] / v[2];
     let y = v[1] / v[2];
     let depth = 1.0 / v[2];
     let (r, g, b) = color.rgb();
-    VertexProjected { x, y, depth, r, g, b }
+    Fragment { x, y, depth, r, g, b }
 }
 
 fn i32_range(x: f32, y: f32) -> core::ops::Range<i32> {
@@ -155,10 +192,6 @@ fn is_in_canvas(x: i32, y: i32) -> bool {
     x >= 0 && x < CANVAS_WIDTH as i32 && y >= 0 && y < CANVAS_HEIGHT as i32
 }
 
-fn x_slope(p: VertexProjected, q: VertexProjected) -> f32 {
-    (q.x - p.x) / (q.y - p.y)
-}
-
 #[derive(Clone, Copy)]
 enum Draw {
     Depths,
@@ -169,25 +202,22 @@ enum Draw {
 fn draw_line_horizontal<T>(
     canvas: &mut Canvas<T>,
     depth_buffer: &mut [f32],
-    x_long: f32,
-    x_short: f32,
-    d_long: f32,
-    d_short: f32,
+    f1: Fragment,
+    f2: Fragment,
     y: i32,
-    color: Color,
     draw: Draw,
 ) -> RenderResult
 where
     T: RenderTarget,
 {
-    let (x0, d0, x1, d1) = if x_long > x_short {
-        (x_short, d_short, x_long, d_long)
+    let (f_left, f_right) = if f1.x > f2.x {
+        (f2, f1)
     } else {
-        (x_long, d_long, x_short, d_short)
+        (f1, f2)
     };
-    let d_slope = (d1 - d0) / (x1 - x0);
-    let mut d = d0;
-    for x in i32_range_inclusive(x0, x1) {
+    let mut f = f_left;
+    let f_slope = f_left.slope_by_x(f_right);
+    for x in i32_range_inclusive(f_left.x, f_right.x) {
         let p = Point::new(x, y);
         let p = plane_to_canvas(p);
         if is_in_canvas(p.x, p.y) {
@@ -195,20 +225,20 @@ where
             let x = p.x as usize;
             let w = CANVAS_WIDTH as usize;
             let depth_index = y * w + x;
-            if d > depth_buffer[depth_index] {
-                depth_buffer[depth_index] = d;
+            if f.depth > depth_buffer[depth_index] {
+                depth_buffer[depth_index] = f.depth;
                 let c = match draw {
                     Draw::Depths => {
-                        let c = (255.0 * d) as u8;
+                        let c = (255.0 * f.depth) as u8;
                         Color::RGB(c, c, c)
                     }
-                    _ => color,
+                    _ => create_color_sdl(f.r, f.g, f.b),
                 };
                 canvas.set_draw_color(c);
                 canvas.draw_point(p)?;
             }
         }
-        d += d_slope;
+        f += f_slope;
     }
     Ok(())
 }
@@ -292,54 +322,24 @@ where
 
                                 p.sort_by(|p, q| p.y.total_cmp(&q.y));
 
-                                let color = create_color_sdl(p[0].r, p[0].g, p[0].b);
-
-                                let x_slope_long = x_slope(p[0], p[2]);
-                                let x_slope_short = x_slope(p[0], p[1]);
-                                let d_slope_long = (p[2].depth - p[0].depth) / (p[2].y - p[0].y);
-                                let d_slope_short = (p[1].depth - p[0].depth) / (p[1].y - p[0].y);
-                                let mut x_long = p[0].x;
-                                let mut x_short = p[0].x;
-                                let mut d_long = p[0].depth;
-                                let mut d_short = p[0].depth;
-                                for y in i32_range(p[0].y, p[1].y) {
-                                    draw_line_horizontal(
-                                        canvas,
-                                        &mut depth_buffer,
-                                        x_long,
-                                        x_short,
-                                        d_long,
-                                        d_short,
-                                        y,
-                                        color,
-                                        draw,
-                                    )?;
-                                    x_long += x_slope_long;
-                                    x_short += x_slope_short;
-                                    d_long += d_slope_long;
-                                    d_short += d_slope_short;
-                                }
-
-                                let x_slope_short = x_slope(p[1], p[2]);
-                                let d_slope_short = (p[2].depth - p[1].depth) / (p[2].y - p[1].y);
-                                let mut x_short = p[1].x;
-                                let mut d_short = p[1].depth;
-                                for y in i32_range(p[1].y, p[2].y) {
-                                    draw_line_horizontal(
-                                        canvas,
-                                        &mut depth_buffer,
-                                        x_long,
-                                        x_short,
-                                        d_long,
-                                        d_short,
-                                        y,
-                                        color,
-                                        draw,
-                                    )?;
-                                    x_long += x_slope_long;
-                                    x_short += x_slope_short;
-                                    d_long += d_slope_long;
-                                    d_short += d_slope_short;
+                                let mut long = p[0];
+                                let long_slope = p[0].slope_by_y(p[2]);
+                                
+                                for i in 0..=1 {
+                                    let mut short = p[i];
+                                    let short_slope = p[i].slope_by_y(p[i + 1]);
+                                    for y in i32_range(p[i].y, p[i + 1].y) {
+                                        draw_line_horizontal(
+                                            canvas,
+                                            &mut depth_buffer,
+                                            long,
+                                            short,
+                                            y,
+                                            draw,
+                                        )?;
+                                        long += long_slope;
+                                        short += short_slope;
+                                    }
                                 }
                             }
                         }
@@ -405,14 +405,14 @@ fn clip_triangle(triangle: [Vec4; 3], plane: &Plane) -> Vec<[Vec4; 3]> {
 
 fn build_scene() -> Scene {
     let vertices = vec![
-        Vec4::new(1.0, 1.0, 1.0, 1.0),
-        Vec4::new(-1.0, 1.0, 1.0, 1.0),
-        Vec4::new(-1.0, -1.0, 1.0, 1.0),
-        Vec4::new(1.0, -1.0, 1.0, 1.0),
-        Vec4::new(1.0, 1.0, -1.0, 1.0),
-        Vec4::new(-1.0, 1.0, -1.0, 1.0),
-        Vec4::new(-1.0, -1.0, -1.0, 1.0),
-        Vec4::new(1.0, -1.0, -1.0, 1.0),
+        Vec4::new(1.0, 1.0, 1.0, 1.0), // 0 - black(0)
+        Vec4::new(-1.0, 1.0, 1.0, 1.0), // 1 - red(0)
+        Vec4::new(-1.0, -1.0, 1.0, 1.0), // 2 - yellow(3)
+        Vec4::new(1.0, -1.0, 1.0, 1.0), // 3 - green(1)
+        Vec4::new(1.0, 1.0, -1.0, 1.0), // 4 - blue(2)
+        Vec4::new(-1.0, 1.0, -1.0, 1.0), // 5 - magenta(4)
+        Vec4::new(-1.0, -1.0, -1.0, 1.0), // 6 - white (0)
+        Vec4::new(1.0, -1.0, -1.0, 1.0), // 7 - cyan(5)
     ];
     
     let colors = vec![
@@ -422,21 +422,23 @@ fn build_scene() -> Scene {
         ColorF32::YELLOW, // 3
         ColorF32::MAGENTA, // 4
         ColorF32::CYAN, // 5
+        ColorF32::WHITE, // 6
+        ColorF32::BLACK, // 7
     ];
 
     let triangles = vec![
-        ModelTriangle::new([0, 1, 2], [0, 0, 0]),
-        ModelTriangle::new([0, 2, 3], [0, 0, 0]),
-        ModelTriangle::new([4, 0, 3], [1, 1, 1]),
-        ModelTriangle::new([4, 3, 7], [1, 1, 1]),
-        ModelTriangle::new([5, 4, 7], [2, 2, 2]),
-        ModelTriangle::new([5, 7, 6], [2, 2, 2]),
-        ModelTriangle::new([1, 5, 6], [3, 3, 3]),
-        ModelTriangle::new([1, 6, 2], [3, 3, 3]),
-        ModelTriangle::new([4, 5, 1], [4, 4, 4]),
-        ModelTriangle::new([4, 1, 0], [4, 4, 4]),
-        ModelTriangle::new([2, 6, 7], [5, 5, 5]),
-        ModelTriangle::new([2, 7, 3], [5, 5, 5]),
+        ModelTriangle::new([0, 1, 2], [7, 0, 3]),
+        ModelTriangle::new([0, 2, 3], [7, 3, 1]),
+        ModelTriangle::new([4, 0, 3], [2, 7, 1]),
+        ModelTriangle::new([4, 3, 7], [2, 1, 5]),
+        ModelTriangle::new([5, 4, 7], [4, 2, 5]),
+        ModelTriangle::new([5, 7, 6], [4, 5, 6]),
+        ModelTriangle::new([1, 5, 6], [0, 4, 6]),
+        ModelTriangle::new([1, 6, 2], [0, 6, 3]),
+        ModelTriangle::new([4, 5, 1], [2, 4, 0]),
+        ModelTriangle::new([4, 1, 0], [2, 0, 7]),
+        ModelTriangle::new([2, 6, 7], [3, 6, 5]),
+        ModelTriangle::new([2, 7, 3], [3, 5, 1]),
     ];
 
     let models = vec![Model::new(vertices, colors, triangles)];
@@ -557,7 +559,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         render_scene(&mut canvas, &scene, draw, cull_backfaces)?;
         canvas.present();
 
-        t += 0.001;
+        t += 0.005;
     }
 
     Ok(())
