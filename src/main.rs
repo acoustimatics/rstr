@@ -211,7 +211,7 @@ fn render_scene<T>(canvas: &mut Canvas<T>, scene: &Scene, draw: Draw, cull_backf
 where
     T: RenderTarget,
 {
-    let mut depth_buffer = [0.0; (CANVAS_WIDTH * CANVAS_HEIGHT) as usize];
+    let mut depth_buffer = vec![0.0; (CANVAS_WIDTH * CANVAS_HEIGHT) as usize];
     let m_projection = {
         let p = perspective_projection(D);
         let m = viewport_to_canvas(CANVAS_WIDTH, CANVAS_HEIGHT, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
